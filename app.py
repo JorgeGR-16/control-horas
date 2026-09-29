@@ -129,7 +129,7 @@ if os.path.exists(NOMBRE_ARCHIVO):
     # ---------------------------------------------------------
     # 7. INTERFAZ VISUAL EN STREAMLIT POR USUARIO
     # ---------------------------------------------------------
-    st.subheader("👤 Consulta por Colaborador")
+    st.subheader("👤 Consulta por Usuario de SS")
 
     lista_usuarios = sorted([n for n in df_semana["NOMBRE"].dropna().unique()])
     usuario_seleccionado = st.selectbox("Selecciona o escribe el nombre del colaborador:", lista_usuarios)
