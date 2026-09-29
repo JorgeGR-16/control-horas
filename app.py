@@ -151,24 +151,6 @@ if os.path.exists(NOMBRE_ARCHIVO):
 
         st.progress(porcentaje / 100)
 
-        # Gráficas
-        st.subheader("📊 Comparativa y Avance")
-        col_g1, col_g2 = st.columns(2)
-
-        with col_g1:
-            st.markdown("**Horas por Día**")
-            df_graf_dia = df_usr_horas.copy()
-            df_graf_dia["FECHA"] = df_graf_dia["FECHA"].astype(str)
-            st.bar_chart(data=df_graf_dia, x="FECHA", y="HORAS_DECIMAL")
-
-        with col_g2:
-            st.markdown("**Horas Trabajadas vs. Restantes**")
-            df_progreso = pd.DataFrame({
-                "Estatus": ["Acumuladas", "Faltantes"],
-                "Horas": [horas_acumuladas, horas_faltantes]
-            })
-            st.bar_chart(data=df_progreso, x="Estatus", y="Horas")
-
         # Tabla con detalle
         st.subheader("📋 Detalle de Asistencias")
         cols_mostrar = [
