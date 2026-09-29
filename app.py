@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import streamlit as st
 
@@ -6,13 +7,12 @@ st.set_page_config(page_title="Control de Horas", layout="wide", page_icon="⏱�
 st.title("⏱️ Consulta Visual de Horas y Asistencias")
 
 # ---------------------------------------------------------
-# 1. CARGA DEL ARCHIVO (SUBIR DESDE LA INTERFAZ)
+# 1. CARGA AUTOMÁTICA DEL ARCHIVO DESDE GITHUB
 # ---------------------------------------------------------
-st.sidebar.header("📁 Cargar Datos")
-archivo_subido = st.sidebar.file_uploader("Sube tu archivo conteo.xlsx", type=["xlsx", "xls"])
+NOMBRE_ARCHIVO = "conteo.xlsx"
 
-if archivo_subido is not None:
-    df_archivo = pd.read_excel(archivo_subido)
+if os.path.exists(NOMBRE_ARCHIVO):
+    df_archivo = pd.read_excel(NOMBRE_ARCHIVO)
 
     df_archivo["FECHAS/HORAS"] = pd.to_datetime(df_archivo["FECHAS/HORAS"], errors="coerce")
     usuarios = {
@@ -178,4 +178,4 @@ if archivo_subido is not None:
         ]
         st.dataframe(df_usr_semana[cols_mostrar], use_container_width=True)
 else:
-    st.info("👈 Por favor, sube tu archivo `conteo.xlsx` en el panel lateral izquierdo para ver el reporte.")
+    st.error("⚠️ No se encontró el archivo `conteo.xlsx` en el repositorio. Asegúrate de haberlo subido a GitHub.")
