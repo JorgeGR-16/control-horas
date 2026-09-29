@@ -140,7 +140,7 @@ if os.path.exists(NOMBRE_ARCHIVO):
 
         # Métricas
         horas_acumuladas = df_usr_horas["HORAS_DECIMAL"].sum()
-        META_SEMANAL = 48.0
+        META_SEMANAL = 20.0
         horas_faltantes = max(0.0, META_SEMANAL - horas_acumuladas)
         porcentaje = min(100.0, (horas_acumuladas / META_SEMANAL) * 100)
 
