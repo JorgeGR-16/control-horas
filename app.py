@@ -1,163 +1,252 @@
-import os
-import pandas as pd
 import streamlit as st
-
-# Configuración de la interfaz web
-st.set_page_config(page_title="Control de Horas", layout="wide", page_icon="⏱️")
-st.title("⏱️ Consulta Visual de Horas y Asistencias")
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as obj
+import os
+import datetime
 
 # ---------------------------------------------------------
-# 1. CARGA AUTOMÁTICA DEL ARCHIVO DESDE GITHUB
+# CONFIGURACIÓN DE PÁGINA STREAMLIT
 # ---------------------------------------------------------
-NOMBRE_ARCHIVO = "conteo.xlsx"
+st.set_page_config(
+    page_title="Control de Asistencias y Servicio Social",
+    page_icon="⏱️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-if os.path.exists(NOMBRE_ARCHIVO):
-    df_archivo = pd.read_excel(NOMBRE_ARCHIVO)
+HORAS_OBJETIVO_DEFAULT = 480.0  # Horas meta estándar para liberación
 
-    df_archivo["FECHAS/HORAS"] = pd.to_datetime(df_archivo["FECHAS/HORAS"], errors="coerce")
-    usuarios = {
-        1: "MISAEL RIVERA LÓPEZ",
-        2: "LUDWING PINEDA CUEVAS",
-        3: "JAVIER GUERRERO SALAS",
-        5: "KATHERINE MENDEZ MARQUEZ",
-        6: "FÁTIMA PACHECO ZACARÍAS",
-        7: "LUIS FERNANDO CASTILLO GARCÍA",
-        9: "KARLA YAMILET AGUILAR RAMÍREZ",
-        10: "ALEJANDRO RAMOS MAYEN",
-        12: "CHRISTIAN GONZÁLEZ GUTIÉRREZ",
-        13: "CESAR YAIR ESPINOSA MARTINEZ",
-        15: "FERNANDO JAVIER RAMIREZ GARCIA",
-        17: "RAFAEL EDUARDO LAGUNAS GÓMEZ",
-        19: "MARIA NATALIA CABRERA MONJARAS",
-    }
+# ---------------------------------------------------------
+# CARGA Y PROCESAMIENTO DE DATOS CON CACHÉ
+# ---------------------------------------------------------
+@st.cache_data(ttl=60)  # Recarga automática si cambia el archivo en GitHub
+def cargar_datos_excel(ruta_excel):
+    if not os.path.exists(ruta_excel):
+        st.error(f"No se encontró el archivo de base de datos en: {ruta_excel}")
+        return None, {}
 
-    df_archivo["NOMBRE"] = df_archivo["NOMBRE"].map(usuarios)
-    df_archivo["ASISTENCIAS"] = df_archivo["ASISTENCIAS"].map({0: "ENTRADA", 1: "SALIDA"})
+    xls = pd.ExcelFile(ruta_excel)
+    
+    # 1. Leer Datos Generales
+    df_generales = pd.read_excel(xls, 'DATOS GENERALES')
+    df_generales = df_generales.dropna(subset=['NOMBRE', 'ESTATUS'])
+    
+    # Clean up whitespace
+    df_generales['NOMBRE'] = df_generales['NOMBRE'].astype(str).str.strip()
+    df_generales['ESTATUS'] = df_generales['ESTATUS'].astype(str).str.strip()
 
-    # ---------------------------------------------------------
-    # 2. LIMPIEZA DE DUPLICADOS Y CREACIÓN DE IDENTIFICADOR
-    # ---------------------------------------------------------
-    df_archivo = df_archivo.sort_values(by=["NOMBRE", "FECHAS/HORAS"])
-    df_archivo["MARCA_ANTERIOR"] = df_archivo.groupby("NOMBRE")["ASISTENCIAS"].shift(1)
+    # 2. Leer hojas de cada usuario activo
+    hojas_sistema = ['DATOS GENERALES', 'RESUMEN_GENERAL', 'FECHAS_PROCESADAS', 'COPIA']
+    hojas_usuarios = [h for h in xls.sheet_names if h not in hojas_sistema]
+    
+    datos_usuarios = {}
+    for hoja in hojas_usuarios:
+        df_u = pd.read_excel(xls, sheet_name=hoja, header=1)
+        # Renombrar primera columna
+        df_u.rename(columns={df_u.columns[0]: 'FECHA'}, inplace=True)
+        df_u = df_u.dropna(subset=['FECHA']).copy()
+        
+        # Filtrar solo fechas válidas
+        df_u['FECHA_DT'] = pd.to_datetime(df_u['FECHA'], errors='coerce')
+        df_u = df_u.dropna(subset=['FECHA_DT']).sort_values('FECHA_DT')
+        
+        # Calcular segundos acumulados de la columna 'TOTAL HORAS DIARIAS'
+        def a_segundos(val):
+            if pd.isna(val) or str(val).strip() in ['', 'nan', 'None']:
+                return 0
+            if isinstance(val, datetime.time):
+                return val.hour * 3600 + val.minute * 60 + val.second
+            if isinstance(val, str):
+                partes = val.split(':')
+                if len(partes) == 3:
+                    try:
+                        return int(partes[0])*3600 + int(partes[1])*60 + int(partes[2])
+                    except:
+                        return 0
+            return 0
 
-    df_archivo = df_archivo[df_archivo["ASISTENCIAS"] != df_archivo["MARCA_ANTERIOR"]].copy()
-    df_archivo.drop(columns=["MARCA_ANTERIOR"], inplace=True)
+        if 'TOTAL HORAS DIARIAS' in df_u.columns:
+            df_u['SEGUNDOS_DIARIOS'] = df_u['TOTAL HORAS DIARIAS'].apply(a_segundos)
+            df_u['HORAS_DIARIAS'] = df_u['SEGUNDOS_DIARIOS'] / 3600.0
+        else:
+            df_u['HORAS_DIARIAS'] = 0.0
 
-    df_archivo["FECHA"] = df_archivo["FECHAS/HORAS"].dt.date
-    df_archivo = df_archivo.sort_values(by=["NOMBRE", "FECHAS/HORAS"]).reset_index(drop=True)
+        datos_usuarios[hoja] = df_u
 
-    df_archivo["IDENTIFICADOR"] = df_archivo.groupby(["NOMBRE", "FECHA"])["ASISTENCIAS"].apply(
-        lambda x: (x == "ENTRADA").cumsum()
-    ).reset_index(level=[0,1], drop=True)
+    return df_generales, datos_usuarios
 
-    def formatear_timedelta(td):
-        if pd.isna(td):
-            return "00:00:00"
-        total_segundos = int(td.total_seconds())
-        horas = total_segundos // 3600
-        minutos = (total_segundos % 3600) // 60
-        segundos = total_segundos % 60
-        return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+def formatear_segundos(segundos):
+    horas = int(segundos // 3600)
+    minutos = int((segundos % 3600) // 60)
+    return f"{horas}h {minutos:02d}m"
 
-    # ---------------------------------------------------------
-    # 3. CREACIÓN DE TURNOS Y CÁLCULO DE TIEMPOS
-    # ---------------------------------------------------------
-    df_turno = df_archivo.pivot_table(
-        index=["NOMBRE", "FECHA", "IDENTIFICADOR"],
-        columns="ASISTENCIAS",
-        values="FECHAS/HORAS",
-        aggfunc="first"
-    ).reset_index()
+# ---------------------------------------------------------
+# CARGA DE ARCHIVO BASE_DATOS.xlsx
+# ---------------------------------------------------------
+RUTA_BASE = "data/BASE_DATOS.xlsx" if os.path.exists("data/BASE_DATOS.xlsx") else "BASE_DATOS.xlsx"
+df_generales, datos_usuarios = cargar_datos_excel(RUTA_BASE)
 
-    df_turno["TURNO"] = df_turno.groupby(["NOMBRE", "FECHA"]).cumcount() + 1
-    df_turno = df_turno[df_turno["TURNO"] <= 3].copy()
+if df_generales is None:
+    st.stop()
 
-    df_turno["TIEMPO_TURNO"] = df_turno["SALIDA"] - df_turno["ENTRADA"]
+# ---------------------------------------------------------
+# BARRA LATERAL (SIDEBAR)
+# ---------------------------------------------------------
+st.sidebar.image("https://img.icons8.com/isometric-folders/100/time-card.png", width=70)
+st.sidebar.title("Sistema de Asistencias")
+st.sidebar.markdown("---")
 
-    df_turno["ENTRADA"] = df_turno["ENTRADA"].dt.strftime("%H:%M:%S")
-    df_turno["SALIDA"] = df_turno["SALIDA"].dt.strftime("%H:%M:%S")
-    df_turno["TOTAL_TURNO"] = df_turno["TIEMPO_TURNO"].apply(formatear_timedelta)
+opcion_vista = st.sidebar.radio(
+    "Selecciona una vista:",
+    ["📊 Resumen General", "👤 Panel Individual de Integrante"],
+    index=0
+)
 
-    # ---------------------------------------------------------
-    # 4. REORGANIZACIÓN HORIZONTAL A 3 TURNOS
-    # ---------------------------------------------------------
-    df_semana = df_turno.pivot(
-        index=["NOMBRE", "FECHA"],
-        columns="TURNO",
-        values=["ENTRADA", "SALIDA", "TOTAL_TURNO"]
+st.sidebar.markdown("---")
+st.sidebar.caption("🟢 Base de Datos sincornizada vía GitHub")
+
+# ---------------------------------------------------------
+# VISTA 1: RESUMEN GENERAL (GLOBAL)
+# ---------------------------------------------------------
+if opcion_vista == "📊 Resumen General":
+    st.title("📊 Resumen General de Asistencias y Servicio")
+    st.markdown("Visión consolidada del avance de los integrantes registrados.")
+    
+    # Calcular totales por usuario
+    totales_lista = []
+    for nombre_hoja, df_u in datos_usuarios.items():
+        total_horas = df_u['HORAS_DIARIAS'].sum() if not df_u.empty else 0.0
+        totales_lista.append({
+            'HOJA': nombre_hoja,
+            'HORAS_ACUMULADAS': round(total_horas, 2)
+        })
+    df_totales = pd.DataFrame(totales_lista)
+    
+    # Mapear datos generales
+    activos_count = len(df_generales[df_generales['ESTATUS'] == 'ACTIVO'])
+    concluidos_count = len(df_generales[df_generales['ESTATUS'] == 'CONCLUIDO'])
+    total_horas_equipo = df_totales['HORAS_ACUMULADAS'].sum()
+    
+    # Tarjetas KPI
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Integrantes Activos", f"{activos_count} alumnos", delta="En proceso")
+    col2.metric("Concluidos", f"{concluidos_count} alumnos", delta="Finalizado", delta_color="normal")
+    col3.metric("Horas Totales del Equipo", f"{round(total_horas_equipo, 1)} hrs")
+    col4.metric("Promedio por Activo", f"{round(total_horas_equipo / max(activos_count, 1), 1)} hrs")
+
+    st.markdown("---")
+    
+    # Gráfico de Avance Comparativo
+    col_g1, col_g2 = st.columns([3, 2])
+    
+    with col_g1:
+        st.subheader("📈 Avance de Horas Acumuladas por Integrante")
+        if not df_totales.empty:
+            df_totales['PORCENTAJE'] = (df_totales['HORAS_ACUMULADAS'] / HORAS_OBJETIVO_DEFAULT) * 100
+            df_totales['PORCENTAJE'] = df_totales['PORCENTAJE'].clip(upper=100)
+            
+            fig_bar = px.bar(
+                df_totales.sort_values('HORAS_ACUMULADAS', ascending=True),
+                x='HORAS_ACUMULADAS',
+                y='HOJA',
+                orientation='h',
+                text='HORAS_ACUMULADAS',
+                labels={'HOJA': 'Integrante', 'HORAS_ACUMULADAS': 'Horas Acumuladas'},
+                color='HORAS_ACUMULADAS',
+                color_continuous_scale='Blues'
+            )
+            fig_bar.add_vline(x=HORAS_OBJETIVO_DEFAULT, line_dash="dash", line_color="red", annotation_text="Meta 480h")
+            fig_bar.update_layout(height=450, showlegend=False)
+            st.plotly_chart(fig_bar, use_container_width=True)
+        else:
+            st.info("No hay datos individuales para graficar.")
+
+    with col_g2:
+        st.subheader("🎓 Distribución por Carrera")
+        if 'CARRERA' in df_generales.columns:
+            df_carrera = df_generales['CARRERA'].value_counts().reset_index()
+            df_carrera.columns = ['CARRERA', 'CANTIDAD']
+            fig_pie = px.pie(
+                df_carrera,
+                names='CARRERA',
+                values='CANTIDAD',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig_pie.update_layout(height=450)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # Tabla General
+    st.subheader("📋 Lista General de Integrantes")
+    st.dataframe(
+        df_generales[['ESTATUS', 'CARRERA', 'MATRÍCULA', 'NOMBRE', 'FECHA INICIO OFICIAL']],
+        use_container_width=True,
+        hide_index=True
     )
 
-    columnas_fijas = [
-        ("ENTRADA", 1), ("SALIDA", 1), ("TOTAL_TURNO", 1),
-        ("ENTRADA", 2), ("SALIDA", 2), ("TOTAL_TURNO", 2),
-        ("ENTRADA", 3), ("SALIDA", 3), ("TOTAL_TURNO", 3)
-    ]
-
-    df_semana = df_semana.reindex(columns=pd.MultiIndex.from_tuples(columnas_fijas))
-    df_semana.columns = [f"{col[0]} {col[1]}" for col in df_semana.columns]
-    df_semana = df_semana.reset_index()
-
-    # ---------------------------------------------------------
-    # 5. CÁLCULO DE TOTAL HORAS DIARIAS
-    # ---------------------------------------------------------
-    horas_totales_dia = df_turno.groupby(['NOMBRE', 'FECHA'])['TIEMPO_TURNO'].sum().reset_index()
-
-    horas_totales_dia['HORAS_DECIMAL'] = horas_totales_dia['TIEMPO_TURNO'].dt.total_seconds() / 3600
-    horas_totales_dia['TOTAL HORAS DIARIAS'] = horas_totales_dia['TIEMPO_TURNO'].apply(formatear_timedelta)
-
-    df_semana = df_semana.merge(horas_totales_dia[['NOMBRE', 'FECHA', 'TOTAL HORAS DIARIAS']], on=['NOMBRE', 'FECHA'], how='left')
-
-    # ---------------------------------------------------------
-    # 6. TRADUCCIÓN DE FECHAS A ESPAÑOL
-    # ---------------------------------------------------------
-    dias = {
-        'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles',
-        'Thursday': 'jueves', 'Friday': 'viernes', 'Saturday': 'sábado', 'Sunday': 'domingo'
-    }
-    meses = {
-        'January': 'enero', 'February': 'febrero', 'March': 'marzo', 'April': 'abril',
-        'May': 'mayo', 'June': 'junio', 'July': 'julio', 'August': 'agosto',
-        'September': 'septiembre', 'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'
-    }
-
-    fechas_dt = pd.to_datetime(df_semana['FECHA'])
-    dia_nom = fechas_dt.dt.day_name().map(dias)
-    mes_nom = fechas_dt.dt.month_name().map(meses)
-
-    df_semana['FECHA_FORMATO'] = dia_nom + ', ' + fechas_dt.dt.day.astype(str) + ' de ' + mes_nom + ' del ' + fechas_dt.dt.year.astype(str)
-
-    # ---------------------------------------------------------
-    # 7. INTERFAZ VISUAL EN STREAMLIT POR USUARIO
-    # ---------------------------------------------------------
-    st.subheader("👤 Consulta por Usuario de SS")
-
-    lista_usuarios = sorted([n for n in df_semana["NOMBRE"].dropna().unique()])
-    usuario_seleccionado = st.selectbox("Selecciona o escribe el nombre del colaborador:", lista_usuarios)
-
-    if usuario_seleccionado:
-        df_usr_semana = df_semana[df_semana["NOMBRE"] == usuario_seleccionado]
-        df_usr_horas = horas_totales_dia[horas_totales_dia["NOMBRE"] == usuario_seleccionado]
-
-        # Métricas
-        horas_acumuladas = df_usr_horas["HORAS_DECIMAL"].sum()
-        META_SEMANAL = 20.0
-        horas_faltantes = max(0.0, META_SEMANAL - horas_acumuladas)
-        porcentaje = min(100.0, (horas_acumuladas / META_SEMANAL) * 100)
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Horas Trabajadas", f"{horas_acumuladas:.2f} hrs")
-        col2.metric("Meta Semanal", f"{META_SEMANAL:.2f} hrs")
-        col3.metric("Cumplimiento", f"{porcentaje:.1f}%")
-
-        st.progress(porcentaje / 100)
-
-        # Tabla con detalle
-        st.subheader("📋 Detalle de Asistencias")
-        cols_mostrar = [
-            "FECHA_FORMATO", "ENTRADA 1", "SALIDA 1", "TOTAL_TURNO 1",
-            "ENTRADA 2", "SALIDA 2", "TOTAL_TURNO 2",
-            "ENTRADA 3", "SALIDA 3", "TOTAL_TURNO 3", "TOTAL HORAS DIARIAS"
-        ]
-        st.dataframe(df_usr_semana[cols_mostrar], use_container_width=True)
+# ---------------------------------------------------------
+# VISTA 2: PANEL INDIVIDUAL DE INTEGRANTE
+# ---------------------------------------------------------
 else:
-    st.error("⚠️ No se encontró el archivo `conteo.xlsx` en el repositorio. Asegúrate de haberlo subido a GitHub.")
+    st.title("👤 Panel Individual de Integrante")
+    
+    lista_alumnos = sorted(list(datos_usuarios.keys()))
+    if not lista_alumnos:
+        st.warning("No se encontraron hojas individuales de alumnos en el archivo.")
+        st.stop()
+        
+    alumno_sel = st.sidebar.selectbox("Selecciona un Integrante:", lista_alumnos)
+    
+    df_u = datos_usuarios[alumno_sel]
+    
+    # Buscar info personal en DATOS GENERALES
+    info_personal = df_generales[df_generales['NOMBRE'].str.contains(alumno_sel.split()[0], case=False, na=False)]
+    
+    # Encabezado del Perfil
+    st.subheader(f"📌 Expediente: {alumno_sel}")
+    
+    if not info_personal.empty:
+        row_p = info_personal.iloc[0]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.markdown(f"**Estatus:** `{row_p.get('ESTATUS', 'N/A')}`")
+        c2.markdown(f"**Carrera:** {row_p.get('CARRERA', 'N/A')}")
+        c3.markdown(f"**Matrícula:** {row_p.get('MATRÍCULA', 'N/A')}")
+        c4.markdown(f"**Correo:** {row_p.get('CORREO\\n INSTITUCIONAL', 'N/A')}")
+    
+    st.markdown("---")
+    
+    # Totales individuales
+    horas_acumuladas = df_u['HORAS_DIARIAS'].sum()
+    horas_restantes = max(0.0, HORAS_OBJETIVO_DEFAULT - horas_acumuladas)
+    porcentaje = min(100.0, (horas_acumuladas / HORAS_OBJETIVO_DEFAULT) * 100)
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Horas Acumuladas", f"{round(horas_acumuladas, 1)} h")
+    m2.metric("Horas Restantes", f"{round(horas_restantes, 1)} h")
+    m3.metric("Porcentaje de Avance", f"{round(porcentaje, 1)} %")
+    m4.metric("Días Registrados", f"{len(df_u)} días")
+    
+    # Barra de progreso
+    st.progress(porcentaje / 100.0)
+    
+    st.markdown("### 📅 Registros de Asistencia")
+    
+    if not df_u.empty:
+        # Gráfica de asistencias diarias
+        fig_ind = px.bar(
+            df_u,
+            x='FECHA_DT',
+            y='HORAS_DIARIAS',
+            labels={'FECHA_DT': 'Fecha', 'HORAS_DIARIAS': 'Horas Trabajadas'},
+            title="Horas trabajadas por día",
+            color_discrete_sequence=['#2b5c8f']
+        )
+        fig_ind.update_layout(height=350)
+        st.plotly_chart(fig_ind, use_container_width=True)
+        
+        # Tabla de detalle diario
+        cols_mostrar = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'TOTAL 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL 2', 'TOTAL HORAS DIARIAS'] if c in df_u.columns]
+        st.dataframe(df_u[cols_mostrar], use_container_width=True, hide_index=True)
+    else:
+        st.info("Este integrante aún no tiene registros de asistencia inyectados.")
