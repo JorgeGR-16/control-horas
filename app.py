@@ -18,12 +18,12 @@ RUTA_BASE = "BASE_DATOS.xlsx"
 HORAS_OBJETIVO = 480.0  # Meta estándar de horas a cubrir
 
 # ---------------------------------------------------------
-# FUNCIONES AUXILIARES DE TIEMPO
+# FUNCIONES AUXILIARES DE CÁLCULO DE HORAS
 # ---------------------------------------------------------
-def convertir_hora_a_segundos(val):
-    """Convierte horas, textos HH:MM:SS, datetime.time o Timedeltas a segundos."""
+def convertir_a_segundos_desde_medianoche(val):
+    """Convierte un objeto de hora o texto HH:MM:SS a segundos acumulados del día."""
     if pd.isna(val) or str(val).strip() in ['', 'nan', 'None', 'NaT', '0:00:00', '00:00:00']:
-        return 0
+        return None
     
     if isinstance(val, pd.Timedelta):
         return int(val.total_seconds())
@@ -39,7 +39,17 @@ def convertir_hora_a_segundos(val):
             elif len(partes) == 2:
                 return int(partes[0]) * 3600 + int(partes[1]) * 60
         except ValueError:
-            return 0
+            return None
+    return None
+
+def calcular_diferencia_par(entrada, salida):
+    """Calcula la diferencia en segundos entre Entrada y Salida (Salida - Entrada)."""
+    seg_e = convertir_a_segundos_desde_medianoche(entrada)
+    seg_s = convertir_a_segundos_desde_medianoche(salida)
+    
+    if seg_e is not None and seg_s is not None:
+        diff = seg_s - seg_e
+        return diff if diff >= 0 else diff + 86400  # Manejo por si cruza medianoche
     return 0
 
 def segundos_a_formato_horas(segundos):
@@ -50,7 +60,7 @@ def segundos_a_formato_horas(segundos):
     return f"{horas:02d}:{minutos:02d}:{segs:02d}"
 
 # ---------------------------------------------------------
-# CARGA Y CÁLCULO DE RESUMEN
+# CARGA Y CÁLCULO DIRECTO DE ASISTENCIAS
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_y_calcular_resumen(ruta):
@@ -69,33 +79,47 @@ def cargar_y_calcular_resumen(ruta):
         df_head = pd.read_excel(xls, sheet_name=hoja, header=None, nrows=1)
         nombre_completo = str(df_head.iloc[0, 0]).strip() if not df_head.empty and pd.notna(df_head.iloc[0, 0]) else hoja
 
-        # 2. Leer los datos de la hoja
+        # 2. Leer datos de la hoja a partir de la fila de encabezados
         df_u = pd.read_excel(xls, sheet_name=hoja, header=1)
         df_u.rename(columns={df_u.columns[0]: 'FECHA'}, inplace=True)
 
-        # 3. Sumar TOTAL HORAS DIARIAS (columna K)
-        segundos_diarios = 0
-        if 'TOTAL HORAS DIARIAS' in df_u.columns:
-            segundos_diarios = df_u['TOTAL HORAS DIARIAS'].apply(convertir_hora_a_segundos).sum()
+        segundos_totales_hoja = 0
 
-        # 4. Restar AJUSTE (-) (columna L)
-        segundos_ajuste = 0
-        if 'AJUSTE (-)' in df_u.columns:
-            segundos_ajuste = df_u['AJUSTE (-)'].apply(convertir_hora_a_segundos).sum()
+        # Iterar sobre las filas para calcular asistencias reales desde pares Entrada/Salida
+        for idx, row in df_u.iterrows():
+            # Par 1
+            e1 = row.get('ENTRADA 1')
+            s1 = row.get('SALIDA 1')
+            t1 = calcular_diferencia_par(e1, s1)
 
-        # Total acumulado neto en segundos
-        segundos_totales = max(0, segundos_diarios - segundos_ajuste)
+            # Par 2
+            e2 = row.get('ENTRADA 2')
+            s2 = row.get('SALIDA 2')
+            t2 = calcular_diferencia_par(e2, s2)
 
-        # Conversiones para métricas del dashboard
-        total_horas_dec = segundos_totales / 3600.0
-        segundos_restantes = max(0, int((HORAS_OBJETIVO * 3600) - segundos_totales))
+            # Par 3
+            e3 = row.get('ENTRADA 3')
+            s3 = row.get('SALIDA 3')
+            t3 = calcular_diferencia_par(e3, s3)
+
+            # Ajuste (-)
+            ajuste_val = row.get('AJUSTE (-)')
+            seg_ajuste = convertir_a_segundos_desde_medianoche(ajuste_val) or 0
+
+            # Suma neta del día
+            subtotal_dia = max(0, (t1 + t2 + t3) - seg_ajuste)
+            segundos_totales_hoja += subtotal_dia
+
+        # Conversiones para las métricas del Dashboard
+        total_horas_dec = segundos_totales_hoja / 3600.0
+        segundos_restantes = max(0, int((HORAS_OBJETIVO * 3600) - segundos_totales_hoja))
         horas_restantes_dec = segundos_restantes / 3600.0
         porcentaje_avance = min(100.0, (total_horas_dec / HORAS_OBJETIVO) * 100.0)
 
         resumen_filas.append({
             'NOMBRE': nombre_completo,
             'HOJA': hoja,
-            'HORAS_CONTABILIZADAS_STR': segundos_a_formato_horas(segundos_totales),
+            'HORAS_CONTABILIZADAS_STR': segundos_a_formato_horas(segundos_totales_hoja),
             'HORAS_RESTANTES_STR': segundos_a_formato_horas(segundos_restantes),
             'HORAS_CONT_DECIMAL': total_horas_dec,
             'HORAS_REST_DECIMAL': horas_restantes_dec,
@@ -127,10 +151,10 @@ st.sidebar.caption("🟢 Sincronizado vía GitHub")
 # ---------------------------------------------------------
 if opcion_vista == "📊 Resumen General":
     st.title("📊 Resumen General de Asistencias y Servicio")
-    st.caption("Visión consolidada del avance calculando horas diarias y ajustes por integrante.")
+    st.caption("Cálculo en tiempo real directo desde los marcajes de entrada y salida.")
 
     if df_resumen is not None and not df_resumen.empty:
-        # KPIs Superiores
+        # KPIs
         total_integrantes = len(df_resumen)
         promedio_avance = df_resumen['PORCENTAJE_AVANCE'].mean()
         total_horas_equipo = df_resumen['HORAS_CONT_DECIMAL'].sum()
@@ -192,17 +216,16 @@ else:
         
         st.subheader(f"📌 Expediente: {info_resumen['NOMBRE']}")
         
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3 = st.columns(3)
         m1.metric("Horas Contabilizadas", info_resumen['HORAS_CONTABILIZADAS_STR'])
         m2.metric("Horas Restantes", info_resumen['HORAS_RESTANTES_STR'])
         m3.metric("Porcentaje de Avance", f"{round(info_resumen['PORCENTAJE_AVANCE'], 1)} %")
-        m4.metric("Registros Encontrados", f"{len(df_u.dropna(subset=['FECHA']))} días")
         
         st.progress(info_resumen['PORCENTAJE_AVANCE'] / 100.0)
         
         st.markdown("### 📅 Detalle Diario de Asistencias")
         if not df_u.empty:
-            cols_ver = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'TOTAL 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL 2', 'TOTAL HORAS DIARIAS', 'AJUSTE (-)', 'JUSTIFICACIÓN', 'TOTAL DE SEMANA'] if c in df_u.columns]
-            st.dataframe(df_u[cols_ver], use_container_width=True, hide_index=True)
+            cols_ver = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'ENTRADA 2', 'SALIDA 2', 'AJUSTE (-)', 'JUSTIFICACIÓN'] if c in df_u.columns]
+            st.dataframe(df_u[cols_ver].dropna(how='all'), use_container_width=True, hide_index=True)
         else:
             st.info("No hay asistencias registradas aún para este usuario.")
