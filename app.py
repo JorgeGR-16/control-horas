@@ -4,6 +4,7 @@ import plotly.express as px
 import os
 import datetime
 
+
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA STREAMLIT
 # ---------------------------------------------------------
