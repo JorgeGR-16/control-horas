@@ -4,7 +4,6 @@ import plotly.express as px
 import os
 import datetime
 
-
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA STREAMLIT
 # ---------------------------------------------------------
@@ -19,44 +18,28 @@ RUTA_BASE = "BASE_DATOS.xlsx"
 HORAS_OBJETIVO = 480.0  # Meta estándar de horas a cubrir
 
 # ---------------------------------------------------------
-# FUNCIONES AUXILIARES DE CONVERSIÓN DE TIEMPO
+# FUNCIONES AUXILIARES DE TIEMPO
 # ---------------------------------------------------------
-def convertir_total_semana_a_segundos(val):
-    """
-    Convierte cualquier valor presente en la columna 'TOTAL DE SEMANA' 
-    (Timestamp de Excel, datetime.time, Timedelta o str HH:MM:SS) a segundos.
-    """
-    if pd.isna(val) or str(val).strip() in ['', 'nan', 'None', 'NaT']:
+def convertir_hora_a_segundos(val):
+    """Convierte horas, textos HH:MM:SS, datetime.time o Timedeltas a segundos."""
+    if pd.isna(val) or str(val).strip() in ['', 'nan', 'None', 'NaT', '0:00:00', '00:00:00']:
         return 0
     
-    # Si viene como Timedelta de pandas/Python
     if isinstance(val, pd.Timedelta):
         return int(val.total_seconds())
     
-    # Si viene como Timestamp/datetime de Excel (ej: 1900-01-12 09:37:37 equivale a 11 días + 09:37:37)
-    if isinstance(val, (pd.Timestamp, datetime.datetime)):
-        if val.year == 1900:
-            dias = val.day - 1
-            return dias * 86400 + val.hour * 3600 + val.minute * 60 + val.second
-        else:
-            return val.hour * 3600 + val.minute * 60 + val.second
-
-    if isinstance(val, datetime.time):
+    if hasattr(val, 'hour'):  # datetime.time o Timestamp
         return val.hour * 3600 + val.minute * 60 + val.second
 
     if isinstance(val, str):
-        partes = val.split(':')
-        if len(partes) == 3:
-            try:
+        partes = val.strip().split(':')
+        try:
+            if len(partes) == 3:
                 return int(partes[0]) * 3600 + int(partes[1]) * 60 + int(partes[2])
-            except:
-                return 0
-        elif len(partes) == 2:
-            try:
+            elif len(partes) == 2:
                 return int(partes[0]) * 3600 + int(partes[1]) * 60
-            except:
-                return 0
-
+        except ValueError:
+            return 0
     return 0
 
 def segundos_a_formato_horas(segundos):
@@ -67,7 +50,7 @@ def segundos_a_formato_horas(segundos):
     return f"{horas:02d}:{minutos:02d}:{segs:02d}"
 
 # ---------------------------------------------------------
-# CARGA Y CÁLCULO SUMANDO LA COLUMNA 'TOTAL DE SEMANA'
+# CARGA Y CÁLCULO DE RESUMEN
 # ---------------------------------------------------------
 @st.cache_data(ttl=60)
 def cargar_y_calcular_resumen(ruta):
@@ -82,38 +65,37 @@ def cargar_y_calcular_resumen(ruta):
     datos_detallados = {}
 
     for hoja in hojas_usuarios:
-        # 1. Nombre completo desde la primera celda
+        # 1. Obtener nombre completo del integrante
         df_head = pd.read_excel(xls, sheet_name=hoja, header=None, nrows=1)
         nombre_completo = str(df_head.iloc[0, 0]).strip() if not df_head.empty and pd.notna(df_head.iloc[0, 0]) else hoja
 
-        # 2. Leer datos de la hoja
+        # 2. Leer los datos de la hoja
         df_u = pd.read_excel(xls, sheet_name=hoja, header=1)
         df_u.rename(columns={df_u.columns[0]: 'FECHA'}, inplace=True)
 
-        # 3. SUMA DIRECTA DE LA COLUMNA "TOTAL DE SEMANA"
-        if 'TOTAL DE SEMANA' in df_u.columns:
-            segundos_semana = df_u['TOTAL DE SEMANA'].apply(convertir_total_semana_a_segundos).sum()
-        else:
-            segundos_semana = 0
+        # 3. Sumar TOTAL HORAS DIARIAS (columna K)
+        segundos_diarios = 0
+        if 'TOTAL HORAS DIARIAS' in df_u.columns:
+            segundos_diarios = df_u['TOTAL HORAS DIARIAS'].apply(convertir_hora_a_segundos).sum()
 
-        # Respaldo en caso de que 'TOTAL DE SEMANA' esté vacía: sumar 'TOTAL HORAS DIARIAS'
-        if segundos_semana == 0 and 'TOTAL HORAS DIARIAS' in df_u.columns:
-            def a_seg_diario(v):
-                if pd.isna(v): return 0
-                if hasattr(v, 'hour'): return v.hour*3600 + v.minute*60 + v.second
-                return 0
-            segundos_semana = df_u['TOTAL HORAS DIARIAS'].apply(a_seg_diario).sum()
+        # 4. Restar AJUSTE (-) (columna L)
+        segundos_ajuste = 0
+        if 'AJUSTE (-)' in df_u.columns:
+            segundos_ajuste = df_u['AJUSTE (-)'].apply(convertir_hora_a_segundos).sum()
 
-        # Conversiones para métricas
-        total_horas_dec = segundos_semana / 3600.0
-        segundos_restantes = max(0, int((HORAS_OBJETIVO * 3600) - segundos_semana))
+        # Total acumulado neto en segundos
+        segundos_totales = max(0, segundos_diarios - segundos_ajuste)
+
+        # Conversiones para métricas del dashboard
+        total_horas_dec = segundos_totales / 3600.0
+        segundos_restantes = max(0, int((HORAS_OBJETIVO * 3600) - segundos_totales))
         horas_restantes_dec = segundos_restantes / 3600.0
         porcentaje_avance = min(100.0, (total_horas_dec / HORAS_OBJETIVO) * 100.0)
 
         resumen_filas.append({
             'NOMBRE': nombre_completo,
             'HOJA': hoja,
-            'HORAS_CONTABILIZADAS_STR': segundos_a_formato_horas(segundos_semana),
+            'HORAS_CONTABILIZADAS_STR': segundos_a_formato_horas(segundos_totales),
             'HORAS_RESTANTES_STR': segundos_a_formato_horas(segundos_restantes),
             'HORAS_CONT_DECIMAL': total_horas_dec,
             'HORAS_REST_DECIMAL': horas_restantes_dec,
@@ -145,7 +127,7 @@ st.sidebar.caption("🟢 Sincronizado vía GitHub")
 # ---------------------------------------------------------
 if opcion_vista == "📊 Resumen General":
     st.title("📊 Resumen General de Asistencias y Servicio")
-    st.caption("Visión consolidada del avance calculando la columna TOTAL DE SEMANA de cada integrante.")
+    st.caption("Visión consolidada del avance calculando horas diarias y ajustes por integrante.")
 
     if df_resumen is not None and not df_resumen.empty:
         # KPIs Superiores
@@ -214,13 +196,13 @@ else:
         m1.metric("Horas Contabilizadas", info_resumen['HORAS_CONTABILIZADAS_STR'])
         m2.metric("Horas Restantes", info_resumen['HORAS_RESTANTES_STR'])
         m3.metric("Porcentaje de Avance", f"{round(info_resumen['PORCENTAJE_AVANCE'], 1)} %")
-        m4.metric("Registros Encontrados", f"{len(df_u)} días")
+        m4.metric("Registros Encontrados", f"{len(df_u.dropna(subset=['FECHA']))} días")
         
         st.progress(info_resumen['PORCENTAJE_AVANCE'] / 100.0)
         
         st.markdown("### 📅 Detalle Diario de Asistencias")
         if not df_u.empty:
-            cols_ver = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'TOTAL 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL 2', 'TOTAL HORAS DIARIAS', 'TOTAL DE SEMANA'] if c in df_u.columns]
+            cols_ver = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'TOTAL 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL 2', 'TOTAL HORAS DIARIAS', 'AJUSTE (-)', 'JUSTIFICACIÓN', 'TOTAL DE SEMANA'] if c in df_u.columns]
             st.dataframe(df_u[cols_ver], use_container_width=True, hide_index=True)
         else:
             st.info("No hay asistencias registradas aún para este usuario.")
