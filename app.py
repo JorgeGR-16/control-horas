@@ -84,7 +84,7 @@ def formatear_segundos(segundos):
 # ---------------------------------------------------------
 # CARGA DE ARCHIVO BASE_DATOS.xlsx
 # ---------------------------------------------------------
-RUTA_BASE = "data/BASE_DATOS.xlsx" if os.path.exists("data/BASE_DATOS.xlsx") else "BASE_DATOS.xlsx"
+RUTA_BASE = "BASE_DATOS.xlsx" if os.path.exists("data/BASE_DATOS.xlsx") else "BASE_DATOS.xlsx"
 df_generales, datos_usuarios = cargar_datos_excel(RUTA_BASE)
 
 if df_generales is None:
