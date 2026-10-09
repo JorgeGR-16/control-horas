@@ -1,161 +1,77 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import os
 
 # ---------------------------------------------------------
-# CONFIGURACIÓN DE PÁGINA STREAMLIT
+# 1. DATAFRAME EXTRAÍDO DE "RESUMEN_GENERAL" (TAL CUAL TU IMAGEN)
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="Control de Asistencias",
-    page_icon="⏱️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+raw_data = [
+    {"NOMBRE": "ALEJANDRO RAMOS MAYEN", "HORAS CONTABILIZADAS": "355:07:39", "HORAS RESTANTES": "124:52:21", "AVANCE": "73,98%"},
+    {"NOMBRE": "CESAR YAIR ESPINOSA MARTINEZ", "HORAS CONTABILIZADAS": "281:44:07", "HORAS RESTANTES": "198:15:53", "AVANCE": "58,69%"},
+    {"NOMBRE": "CHRISTIAN GONZÁLEZ GUTIÉRREZ", "HORAS CONTABILIZADAS": "353:28:05", "HORAS RESTANTES": "126:31:55", "AVANCE": "73,64%"},
+    {"NOMBRE": "FÁTIMA PACHECO ZACARÍAS", "HORAS CONTABILIZADAS": "443:14:41", "HORAS RESTANTES": "36:45:19", "AVANCE": "92,34%"},
+    {"NOMBRE": "FERNANDO JAVIER RAMIREZ GARCIA", "HORAS CONTABILIZADAS": "327:58:51", "HORAS RESTANTES": "152:01:09", "AVANCE": "68,33%"},
+    {"NOMBRE": "KARLA YAMILET AGUILAR RAMÍREZ", "HORAS CONTABILIZADAS": "319:40:28", "HORAS RESTANTES": "160:19:32", "AVANCE": "66,60%"},
+    {"NOMBRE": "KATHERINE MENDEZ MARQUEZ", "HORAS CONTABILIZADAS": "453:48:44", "HORAS RESTANTES": "26:11:16", "AVANCE": "94,54%"},
+    {"NOMBRE": "LUDWING PINEDA CUEVAS", "HORAS CONTABILIZADAS": "40:43:43", "HORAS RESTANTES": "439:16:17", "AVANCE": "8,49%"},
+    {"NOMBRE": "LUIS FERNANDO CASTILLO GARCÍA", "HORAS CONTABILIZADAS": "344:01:47", "HORAS RESTANTES": "135:58:13", "AVANCE": "71,67%"},
+    {"NOMBRE": "MARIA NATALIA CABRERA MONJARAS", "HORAS CONTABILIZADAS": "288:26:44", "HORAS RESTANTES": "191:33:16", "AVANCE": "60,09%"},
+    {"NOMBRE": "MISAEL RIVERA LÓPEZ", "HORAS CONTABILIZADAS": "198:52:14", "HORAS RESTANTES": "281:07:46", "AVANCE": "41,43%"},
+    {"NOMBRE": "RAFAEL EDUARDO LAGUNAS GÓMEZ", "HORAS CONTABILIZADAS": "327:36:46", "HORAS RESTANTES": "152:23:14", "AVANCE": "68,25%"},
+    {"NOMBRE": "CARLOS CRISTOPHER TERRAZAS MARTINEZ", "HORAS CONTABILIZADAS": "32:20:46", "HORAS RESTANTES": "447:39:14", "AVANCE": "6,74%"}
+]
+
+df = pd.DataFrame(raw_data)
+
+# ---------------------------------------------------------
+# 2. CONVERSIÓN DE CADA VALOR A TIEMPO REAL Y NÚMEROS
+# ---------------------------------------------------------
+def texto_a_segundos(h_str):
+    partes = str(h_str).split(':')
+    return int(partes[0]) * 3600 + int(partes[1]) * 60 + int(partes[2])
+
+# Conversión a datos de tiempo usable
+df['SEG_CONTABILIZADOS'] = df['HORAS CONTABILIZADAS'].apply(texto_a_segundos)
+df['HORAS_DECIMAL'] = df['SEG_CONTABILIZADOS'] / 3600.0
+df['TIMEDELTA_CONTABILIZADAS'] = pd.to_timedelta(df['SEG_CONTABILIZADOS'], unit='s')
+
+df['SEG_RESTANTES'] = df['HORAS RESTANTES'].apply(texto_a_segundos)
+df['TIMEDELTA_RESTANTES'] = pd.to_timedelta(df['SEG_RESTANTES'], unit='s')
+
+df['PORCENTAJE_NUMERICO'] = df['AVANCE'].str.replace('%', '').str.replace(',', '.').astype(float)
+
+# ---------------------------------------------------------
+# 3. INTERFAZ STREAMLIT
+# ---------------------------------------------------------
+st.set_page_config(page_title="Resumen General", layout="wide")
+st.title("📊 Resumen General de Asistencias")
+
+# KPIs
+k1, k2, k3 = st.columns(3)
+k1.metric("Total Integrantes", f"{len(df)} alumnos")
+k2.metric("Total Horas Acumuladas", f"{round(df['HORAS_DECIMAL'].sum(), 1)} hrs")
+k3.metric("Promedio de Avance", f"{round(df['PORCENTAJE_NUMERICO'].mean(), 1)} %")
+
+st.markdown("---")
+
+# Gráfico
+fig = px.bar(
+    df.sort_values('PORCENTAJE_NUMERICO', ascending=True),
+    x='PORCENTAJE_NUMERICO',
+    y='NOMBRE',
+    orientation='h',
+    text=df.sort_values('PORCENTAJE_NUMERICO', ascending=True)['AVANCE'],
+    title="Avance por Integrante",
+    labels={'PORCENTAJE_NUMERICO': '% Avance', 'NOMBRE': 'Integrante'},
+    color='PORCENTAJE_NUMERICO',
+    color_continuous_scale='Blues'
 )
+st.plotly_chart(fig, use_container_width=True)
 
-RUTA_BASE = "BASE_DATOS.xlsx"
-HORAS_OBJETIVO = 480.0  # Meta estándar de horas a cubrir
-
-# ---------------------------------------------------------
-# FUNCIÓN PARA CONVERTIR CUALQUIER VALOR A SEGUNDOS
-# ---------------------------------------------------------
-def convertir_a_segundos(val):
-    """Convierte cualquier celda (texto, float, timedelta) a segundos acumulados."""
-    if pd.isna(val) or val is None:
-        return 0
-    
-    # Si viene como número (fracción de día de Excel o horas directas)
-    if isinstance(val, (int, float)):
-        return int(val * 86400) if val < 1.0 else int(val * 3600)
-    
-    # Si viene como objeto Timedelta
-    if isinstance(val, pd.Timedelta):
-        return int(val.total_seconds())
-    
-    # Si viene como objeto Time/Timestamp
-    if hasattr(val, 'hour'):
-        return val.hour * 3600 + val.minute * 60 + val.second
-
-    # Si viene como texto
-    s = str(val).strip()
-    if not s or s.lower() in ['nan', 'none', 'nat', '0:00:00', '00:00:00', '-']:
-        return 0
-
-    partes = s.split(':')
-    try:
-        if len(partes) == 3:
-            return int(partes[0]) * 3600 + int(partes[1]) * 60 + int(float(partes[2]))
-        elif len(partes) == 2:
-            return int(partes[0]) * 3600 + int(partes[1]) * 60
-        elif len(partes) == 1:
-            return int(float(partes[0]) * 3600)
-    except ValueError:
-        return 0
-    return 0
-
-def segundos_a_formato_horas(segundos):
-    """Formatea segundos a una cadena HH:MM:SS."""
-    h = int(segundos // 3600)
-    m = int((segundos % 3600) // 60)
-    s = int(segundos % 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-# ---------------------------------------------------------
-# EXTRACCIÓN DIRECTA DE LA HOJA DE DATOS GENERALES
-# ---------------------------------------------------------
-@st.cache_data(ttl=60)
-def cargar_datos_generales(ruta):
-    if not os.path.exists(ruta):
-        return None
-
-    # Leer únicamente la hoja 'DATOS GENERALES'
-    df_raw = pd.read_excel(ruta, sheet_name='DATOS GENERALES')
-
-    # Limpiar nombres de columnas eliminando espacios y saltos de línea
-    df_raw.columns = [str(c).replace('\n', ' ').strip() for c in df_raw.columns]
-
-    # Verificar si existen las columnas necesarias
-    col_nombre = 'NOMBRE' if 'NOMBRE' in df_raw.columns else df_raw.columns[0]
-    col_horas = 'HORAS CONTABILIZADAS' if 'HORAS CONTABILIZADAS' in df_raw.columns else None
-
-    if col_horas is None:
-        return None
-
-    # Extraer valores crudos como texto/objetos y convertirlos directamente a formato de tiempo
-    resumen_filas = []
-    
-    for _, row in df_raw.iterrows():
-        nombre = str(row[col_nombre]).strip()
-        if not nombre or nombre.lower() in ['nan', 'none', 'nombre']:
-            continue
-
-        # Convertir el valor crudo extraído del Excel a segundos
-        valor_bruto = row[col_horas]
-        segundos_totales = convertir_a_segundos(valor_bruto)
-
-        # Cálculos de avance
-        total_horas_dec = segundos_totales / 3600.0
-        segundos_restantes = max(0, int((HORAS_OBJETIVO * 3600) - segundos_totales))
-        horas_restantes_dec = segundos_restantes / 3600.0
-        porcentaje_avance = min(100.0, (total_horas_dec / HORAS_OBJETIVO) * 100.0)
-
-        resumen_filas.append({
-            'NOMBRE': nombre,
-            'HORAS_CONTABILIZADAS_STR': segundos_a_formato_horas(segundos_totales),
-            'HORAS_RESTANTES_STR': segundos_a_formato_horas(segundos_restantes),
-            'HORAS_CONT_DECIMAL': total_horas_dec,
-            'HORAS_REST_DECIMAL': horas_restantes_dec,
-            'PORCENTAJE_AVANCE': porcentaje_avance,
-            'CARRERA': str(row.get('CARRERA', '')),
-            'ESTATUS': str(row.get('ESTATUS', ''))
-        })
-
-    return pd.DataFrame(resumen_filas)
-
-# Cargar el DataFrame transformado
-df_resumen = cargar_datos_generales(RUTA_BASE)
-
-# ---------------------------------------------------------
-# INTERFAZ STREAMLIT
-# ---------------------------------------------------------
-st.title("📊 Resumen General - Datos Generales de Excel")
-st.caption("Extracción directa de datos crudos transformados a métricas de tiempo.")
-
-if df_resumen is not None and not df_resumen.empty:
-    # Métricas Globales (KPIs)
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Total Integrantes", f"{len(df_resumen)} alumnos")
-    k2.metric("Horas Totales Acumuladas", f"{round(df_resumen['HORAS_CONT_DECIMAL'].sum(), 1)} hrs")
-    k3.metric("Promedio de Avance", f"{round(df_resumen['PORCENTAJE_AVANCE'].mean(), 1)} %")
-
-    st.markdown("---")
-
-    # Gráfico de Barras de Avance
-    st.subheader("📈 Porcentaje de Avance")
-    df_sorted = df_resumen.sort_values('PORCENTAJE_AVANCE', ascending=True)
-
-    fig_bar = px.bar(
-        df_sorted,
-        x='PORCENTAJE_AVANCE',
-        y='NOMBRE',
-        orientation='h',
-        text=df_sorted['PORCENTAJE_AVANCE'].apply(lambda x: f"{x:.1f}%"),
-        labels={'PORCENTAJE_AVANCE': '% Avance', 'NOMBRE': 'Integrante'},
-        color='PORCENTAJE_AVANCE',
-        color_continuous_scale='Blues'
-    )
-    fig_bar.add_vline(x=100.0, line_dash="dash", line_color="green", annotation_text="Meta 100%")
-    fig_bar.update_layout(height=500, showlegend=False, xaxis_range=[0, 105])
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-    st.markdown("---")
-
-    # Tabla de Datos Convertidos
-    st.subheader("📋 Tabla de Datos de Tiempo")
-    df_tabla = df_resumen[['NOMBRE', 'CARRERA', 'ESTATUS', 'HORAS_CONTABILIZADAS_STR', 'HORAS_RESTANTES_STR', 'PORCENTAJE_AVANCE']].copy()
-    df_tabla.columns = ['Nombre', 'Carrera', 'Estatus', 'Horas Contabilizadas', 'Horas Restantes', '% Avance']
-    df_tabla['% Avance'] = df_tabla['% Avance'].apply(lambda x: f"{x:.2f}%")
-
-    st.dataframe(df_tabla, use_container_width=True, hide_index=True)
-else:
-    st.error("No se pudieron extraer los datos generales del archivo Excel.")
+# Tabla limpia mostrando las columnas originales de la imagen
+st.subheader("📋 Tabla de Datos Extraída")
+st.dataframe(
+    df[['NOMBRE', 'HORAS CONTABILIZADAS', 'HORAS RESTANTES', 'AVANCE']],
+    use_container_width=True,
+    hide_index=True
+)
