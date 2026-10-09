@@ -47,7 +47,7 @@ st.set_page_config(page_title="Resumen General", layout="wide")
 st.title("📊 Resumen General de Asistencias")
 
 # KPIs
-k1, k2 = st.columns(3)
+k1, k2 = st.columns(2)
 k1.metric("Total Integrantes", f"{len(df)} alumnos")
 
 k2.metric("Promedio de Avance", f"{round(df['PORCENTAJE_NUMERICO'].mean(), 1)} %")
