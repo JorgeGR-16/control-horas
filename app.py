@@ -66,7 +66,7 @@ st.sidebar.title("Sistema de Asistencias")
 st.sidebar.markdown("---")
 opcion_vista = st.sidebar.radio(
     "Selecciona una vista:",
-    ["📊 Resumen General", "👤 Panel Individual de Integrante"]
+    ["📊 Resumen General", "👤 Panel Individual de Integrante de SS"]
 )
 
 # ---------------------------------------------------------
