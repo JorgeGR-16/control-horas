@@ -105,4 +105,51 @@ if opcion_vista == "📊 Resumen General":
 else:
     st.title("👤 Panel Individual de Integrante")
     
-    # Lista de usuarios
+    # Lista de usuarios disponibles
+    usuario_sel = st.sidebar.selectbox("Selecciona un Integrante:", df_resumen['NOMBRE'].tolist())
+    
+    # Extraer información del usuario seleccionado
+    info_user = df_resumen[df_resumen['NOMBRE'] == usuario_sel].iloc[0]
+    hoja_user = info_user['HOJA']
+    
+    # Encabezado individual
+    st.subheader(f"📌 Expediente: {usuario_sel}")
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Horas Contabilizadas", info_user['HORAS CONTABILIZADAS'])
+    m2.metric("Horas Restantes", info_user['HORAS RESTANTES'])
+    m3.metric("Porcentaje de Avance", info_user['AVANCE'])
+    
+    st.progress(info_user['PORCENTAJE_NUMERICO'] / 100.0)
+    
+    st.markdown("---")
+
+    # Lectura de la hoja individual del usuario desde el Excel si existe
+    if os.path.exists(RUTA_BASE):
+        xls = pd.ExcelFile(RUTA_BASE)
+        if hoja_user in xls.sheet_names:
+            df_u = pd.read_excel(xls, sheet_name=hoja_user, header=1)
+            df_u.rename(columns={df_u.columns[0]: 'FECHA'}, inplace=True)
+            df_u['FECHA_DT'] = pd.to_datetime(df_u['FECHA'], errors='coerce')
+            df_u_valid = df_u.dropna(subset=['FECHA_DT']).copy()
+            
+            if not df_u_valid.empty:
+                # Agrupar por semanas
+                df_u_valid['AÑO_SEMANA'] = df_u_valid['FECHA_DT'].dt.strftime('Semana %U (%Y)')
+                semanas_disponibles = df_u_valid['AÑO_SEMANA'].unique()
+                
+                st.subheader("📅 Consulta de Avance por Semana")
+                semana_sel = st.selectbox("Selecciona la semana que deseas consultar:", semanas_disponibles)
+                
+                # Filtrar semana
+                df_semana = df_u_valid[df_u_valid['AÑO_SEMANA'] == semana_sel]
+                
+                st.markdown(f"#### Registros de la {semana_sel}")
+                cols_pantalla = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'ENTRADA 2', 'SALIDA 2', 'AJUSTE (-)', 'JUSTIFICACIÓN'] if c in df_semana.columns]
+                st.dataframe(df_semana[cols_pantalla], use_container_width=True, hide_index=True)
+            else:
+                st.info("Este usuario no tiene registros de asistencias con fecha aún.")
+        else:
+            st.warning(f"No se encontró la hoja individual '{hoja_user}' en el archivo Excel.")
+    else:
+        st.info("El archivo 'BASE_DATOS.xlsx' no está presente localmente para mostrar el detalle diario.")
