@@ -49,7 +49,7 @@ st.title("📊 Resumen General de Asistencias")
 # KPIs
 k1, k2, k3 = st.columns(3)
 k1.metric("Total Integrantes", f"{len(df)} alumnos")
-k2.metric("Total Horas Acumuladas", f"{round(df['HORAS_DECIMAL'].sum(), 1)} hrs")
+
 k3.metric("Promedio de Avance", f"{round(df['PORCENTAJE_NUMERICO'].mean(), 1)} %")
 
 st.markdown("---")
