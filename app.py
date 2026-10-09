@@ -39,10 +39,22 @@ df_resumen = pd.DataFrame(datos_resumen_general)
 # Conversiones numéricas
 def texto_a_segundos(h_str):
     try:
-        partes = str(h_str).split(':')
-        return int(partes[0]) * 3600 + int(partes[1]) * 60 + int(partes[2])
+        partes = str(h_str).strip().split(':')
+        if len(partes) == 3:
+            return int(partes[0]) * 3600 + int(partes[1]) * 60 + int(float(partes[2]))
+        elif len(partes) == 2:
+            return int(partes[0]) * 3600 + int(partes[1]) * 60
     except:
         return 0
+    return 0
+
+def segundos_a_formato(segundos):
+    if segundos <= 0:
+        return "00:00:00"
+    h = int(segundos // 3600)
+    m = int((segundos % 3600) // 60)
+    s = int(segundos % 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 df_resumen['HORAS_DECIMAL'] = df_resumen['HORAS CONTABILIZADAS'].apply(texto_a_segundos) / 3600.0
 df_resumen['PORCENTAJE_NUMERICO'] = df_resumen['AVANCE'].str.replace('%', '').str.replace(',', '.').astype(float)
@@ -100,19 +112,15 @@ if opcion_vista == "📊 Resumen General":
     )
 
 # ---------------------------------------------------------
-# VISTA 2: PANEL INDIVIDUAL CON FILTRO SEMANAL
+# VISTA 2: PANEL INDIVIDUAL CON CÁLCULO DE TOTAL HORAS DIARIAS
 # ---------------------------------------------------------
 else:
     st.title("👤 Panel Individual de Integrante")
     
-    # Lista de usuarios disponibles
     usuario_sel = st.sidebar.selectbox("Selecciona un Integrante:", df_resumen['NOMBRE'].tolist())
-    
-    # Extraer información del usuario seleccionado
     info_user = df_resumen[df_resumen['NOMBRE'] == usuario_sel].iloc[0]
     hoja_user = info_user['HOJA']
     
-    # Encabezado individual
     st.subheader(f"📌 Expediente: {usuario_sel}")
     
     m1, m2, m3 = st.columns(3)
@@ -124,7 +132,6 @@ else:
     
     st.markdown("---")
 
-    # Lectura de la hoja individual del usuario desde el Excel si existe
     if os.path.exists(RUTA_BASE):
         xls = pd.ExcelFile(RUTA_BASE)
         if hoja_user in xls.sheet_names:
@@ -141,12 +148,40 @@ else:
                 st.subheader("📅 Consulta de Avance por Semana")
                 semana_sel = st.selectbox("Selecciona la semana que deseas consultar:", semanas_disponibles)
                 
-                # Filtrar semana
-                df_semana = df_u_valid[df_u_valid['AÑO_SEMANA'] == semana_sel]
+                # Filtrar la semana seleccionada
+                df_semana = df_u_valid[df_u_valid['AÑO_SEMANA'] == semana_sel].copy()
                 
+                # -----------------------------------------------------
+                # CÁLCULO AUTOMÁTICO DE 'TOTAL HORAS DIARIAS'
+                # -----------------------------------------------------
+                def calcular_total_diario_row(row):
+                    e1 = texto_a_segundos(row.get('ENTRADA 1'))
+                    s1 = texto_a_segundos(row.get('SALIDA 1'))
+                    t1 = max(0, s1 - e1) if s1 > e1 else 0
+
+                    e2 = texto_a_segundos(row.get('ENTRADA 2'))
+                    s2 = texto_a_segundos(row.get('SALIDA 2'))
+                    t2 = max(0, s2 - e2) if s2 > e2 else 0
+
+                    ajuste = texto_a_segundos(row.get('AJUSTE (-)'))
+                    
+                    total_seg = max(0, (t1 + t2) - ajuste)
+                    return segundos_a_formato(total_seg)
+
+                df_semana['TOTAL HORAS DIARIAS'] = df_semana.apply(calcular_total_diario_row, axis=1)
+                
+                # Formatear fecha limpia (YYYY-MM-DD)
+                df_semana['FECHA'] = df_semana['FECHA_DT'].dt.strftime('%Y-%m-%d')
+
+                # Columnas a mostrar en la tabla en orden correcto
+                cols_orden = ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL HORAS DIARIAS', 'AJUSTE (-)', 'JUSTIFICACIÓN']
+                cols_presentes = [c for c in cols_orden if c in df_semana.columns]
+
+                # Rellenar valores nulos con vacío para que no muestre "None"
+                df_display = df_semana[cols_presentes].fillna("")
+
                 st.markdown(f"#### Registros de la {semana_sel}")
-                cols_pantalla = [c for c in ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'ENTRADA 2', 'SALIDA 2', 'AJUSTE (-)', 'JUSTIFICACIÓN'] if c in df_semana.columns]
-                st.dataframe(df_semana[cols_pantalla], use_container_width=True, hide_index=True)
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
             else:
                 st.info("Este usuario no tiene registros de asistencias con fecha aún.")
         else:
