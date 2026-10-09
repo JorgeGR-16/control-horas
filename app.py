@@ -66,7 +66,7 @@ st.sidebar.title("Sistema de Asistencias")
 st.sidebar.markdown("---")
 opcion_vista = st.sidebar.radio(
     "Selecciona una vista:",
-    ["📊 Resumen General", "👤 Panel Individual de Integrante de SS"]
+    ["📊 Resumen General", "👤 Avance Individual"]
 )
 
 # ---------------------------------------------------------
@@ -111,11 +111,11 @@ if opcion_vista == "📊 Resumen General":
         hide_index=True
     )
 
-# ---------------------------------------------------------
-# VISTA 2: PANEL INDIVIDUAL CON CÁLCULO DE TOTAL HORAS DIARIAS
-# ---------------------------------------------------------
+
+
+
 else:
-    st.title("👤 Panel Individual de Integrante")
+    st.title("👤 AVANCE INDIVIDUAL")
     
     usuario_sel = st.sidebar.selectbox("Selecciona un Integrante:", df_resumen['NOMBRE'].tolist())
     info_user = df_resumen[df_resumen['NOMBRE'] == usuario_sel].iloc[0]
