@@ -121,7 +121,7 @@ else:
     info_user = df_resumen[df_resumen['NOMBRE'] == usuario_sel].iloc[0]
     hoja_user = info_user['HOJA']
     
-    st.subheader(f"📌 Expediente: {usuario_sel}")
+    st.subheader(f"📌 AVANCE DE: {usuario_sel}")
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Horas Contabilizadas", info_user['HORAS CONTABILIZADAS'])
