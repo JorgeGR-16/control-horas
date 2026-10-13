@@ -136,7 +136,23 @@ else:
         xls = pd.ExcelFile(RUTA_BASE)
         if hoja_user in xls.sheet_names:
             df_u = pd.read_excel(xls, sheet_name=hoja_user, header=1)
+            
+            # Normalizar nombres de columnas para eliminar espacios accidentales
+            df_u.columns = df_u.columns.astype(str).str.strip()
+            
+            # Renombrar variaciones comunes de la primera columna a 'FECHA'
             df_u.rename(columns={df_u.columns[0]: 'FECHA'}, inplace=True)
+            
+            # Renombrar variaciones de la columna 'JUSTIFICACIÓN'
+            renombres = {
+                'JUSTIFICACION': 'JUSTIFICACIÓN',
+                'justificacion': 'JUSTIFICACIÓN',
+                'justificación': 'JUSTIFICACIÓN',
+                'MOTIVO': 'JUSTIFICACIÓN',
+                'OBSERVACIONES': 'JUSTIFICACIÓN'
+            }
+            df_u.rename(columns=renombres, inplace=True)
+
             df_u['FECHA_DT'] = pd.to_datetime(df_u['FECHA'], errors='coerce')
             df_u_valid = df_u.dropna(subset=['FECHA_DT']).copy()
             
@@ -151,7 +167,7 @@ else:
                 # Filtrar la semana seleccionada
                 df_semana = df_u_valid[df_u_valid['AÑO_SEMANA'] == semana_sel].copy()
                 
-                # Función auxiliar para parsear valores de hora
+                # Función auxiliar para convertir valores de hora (str, datetime.time, pd.Timestamp) a segundos
                 def parsear_a_segundos(valor):
                     if pd.isna(valor) or valor is None:
                         return 0
@@ -162,7 +178,7 @@ else:
                     return texto_a_segundos(valor)
 
                 # -----------------------------------------------------
-                # CÁLCULO AUTOMÁTICO DE 'TOTAL HORAS DIARIAS' (INCLUYE TURNO 3)
+                # CÁLCULO AUTOMÁTICO DE 'TOTAL HORAS DIARIAS' (INCLUYE TURNO 1, 2 Y 3)
                 # -----------------------------------------------------
                 def calcular_total_diario_row(row):
                     # Turno 1
@@ -191,7 +207,11 @@ else:
                 # Formatear fecha limpia (YYYY-MM-DD)
                 df_semana['FECHA'] = df_semana['FECHA_DT'].dt.strftime('%Y-%m-%d')
 
-                # Columnas a mostrar en la tabla incluyendo ENTRADA 3 y SALIDA 3
+                # Si la columna 'JUSTIFICACIÓN' no existía en el archivo, se crea vacía para evitar fallos
+                if 'JUSTIFICACIÓN' not in df_semana.columns:
+                    df_semana['JUSTIFICACIÓN'] = ""
+
+                # Columnas a mostrar en el orden deseado
                 cols_orden = [
                     'FECHA', 
                     'ENTRADA 1', 'SALIDA 1', 
@@ -201,10 +221,13 @@ else:
                     'AJUSTE (-)', 
                     'JUSTIFICACIÓN'
                 ]
+
                 cols_presentes = [c for c in cols_orden if c in df_semana.columns]
 
-                # Rellenar valores nulos con vacío para visualización limpia
-                df_display = df_semana[cols_presentes].fillna("")
+                # Rellenar nulos de forma segura para no perder la visualización
+                df_display = df_semana[cols_presentes].copy()
+                df_display['JUSTIFICACIÓN'] = df_display['JUSTIFICACIÓN'].astype(str).replace(['nan', 'None', 'NaN'], '')
+                df_display = df_display.fillna("")
 
                 st.markdown(f"#### Registros de la {semana_sel}")
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
