@@ -151,21 +151,39 @@ else:
                 # Filtrar la semana seleccionada
                 df_semana = df_u_valid[df_u_valid['AÑO_SEMANA'] == semana_sel].copy()
                 
+                # Función auxiliar para parsear valores de hora
+                def parsear_a_segundos(valor):
+                    if pd.isna(valor) or valor is None:
+                        return 0
+                    if isinstance(valor, (pd.Timestamp, pd.Series)):
+                        return valor.hour * 3600 + valor.minute * 60 + valor.second
+                    if hasattr(valor, 'hour'):  # Para objetos datetime.time
+                        return valor.hour * 3600 + valor.minute * 60 + valor.second
+                    return texto_a_segundos(valor)
+
                 # -----------------------------------------------------
-                # CÁLCULO AUTOMÁTICO DE 'TOTAL HORAS DIARIAS'
+                # CÁLCULO AUTOMÁTICO DE 'TOTAL HORAS DIARIAS' (INCLUYE TURNO 3)
                 # -----------------------------------------------------
                 def calcular_total_diario_row(row):
-                    e1 = texto_a_segundos(row.get('ENTRADA 1'))
-                    s1 = texto_a_segundos(row.get('SALIDA 1'))
+                    # Turno 1
+                    e1 = parsear_a_segundos(row.get('ENTRADA 1'))
+                    s1 = parsear_a_segundos(row.get('SALIDA 1'))
                     t1 = max(0, s1 - e1) if s1 > e1 else 0
 
-                    e2 = texto_a_segundos(row.get('ENTRADA 2'))
-                    s2 = texto_a_segundos(row.get('SALIDA 2'))
+                    # Turno 2
+                    e2 = parsear_a_segundos(row.get('ENTRADA 2'))
+                    s2 = parsear_a_segundos(row.get('SALIDA 2'))
                     t2 = max(0, s2 - e2) if s2 > e2 else 0
 
-                    ajuste = texto_a_segundos(row.get('AJUSTE (-)'))
+                    # Turno 3
+                    e3 = parsear_a_segundos(row.get('ENTRADA 3'))
+                    s3 = parsear_a_segundos(row.get('SALIDA 3'))
+                    t3 = max(0, s3 - e3) if s3 > e3 else 0
+
+                    # Ajustes
+                    ajuste = parsear_a_segundos(row.get('AJUSTE (-)'))
                     
-                    total_seg = max(0, (t1 + t2) - ajuste)
+                    total_seg = max(0, (t1 + t2 + t3) - ajuste)
                     return segundos_a_formato(total_seg)
 
                 df_semana['TOTAL HORAS DIARIAS'] = df_semana.apply(calcular_total_diario_row, axis=1)
@@ -173,11 +191,19 @@ else:
                 # Formatear fecha limpia (YYYY-MM-DD)
                 df_semana['FECHA'] = df_semana['FECHA_DT'].dt.strftime('%Y-%m-%d')
 
-                # Columnas a mostrar en la tabla en orden correcto
-                cols_orden = ['FECHA', 'ENTRADA 1', 'SALIDA 1', 'ENTRADA 2', 'SALIDA 2', 'TOTAL HORAS DIARIAS', 'AJUSTE (-)', 'JUSTIFICACIÓN']
+                # Columnas a mostrar en la tabla incluyendo ENTRADA 3 y SALIDA 3
+                cols_orden = [
+                    'FECHA', 
+                    'ENTRADA 1', 'SALIDA 1', 
+                    'ENTRADA 2', 'SALIDA 2', 
+                    'ENTRADA 3', 'SALIDA 3', 
+                    'TOTAL HORAS DIARIAS', 
+                    'AJUSTE (-)', 
+                    'JUSTIFICACIÓN'
+                ]
                 cols_presentes = [c for c in cols_orden if c in df_semana.columns]
 
-                # Rellenar valores nulos con vacío para que no muestre "None"
+                # Rellenar valores nulos con vacío para visualización limpia
                 df_display = df_semana[cols_presentes].fillna("")
 
                 st.markdown(f"#### Registros de la {semana_sel}")
